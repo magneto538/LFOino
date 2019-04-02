@@ -1,5 +1,5 @@
 #include <math.h> 
-#define LED_PIN 3
+#define LED_PIN 6
 #define POT_PIN A0
 #define BUTTON_PIN A1
 #define RATE_MIN 1.0
@@ -13,12 +13,11 @@ double value = 0;
 int wave = 0;
 int waveBtnState;
 
-double time = 0;
-
 void setup() {
-  pinMode(LED_PIN, OUTPUT);
-  pinMode(POT_PIN, INPUT);
-  pinMode(BUTTON_PIN, INPUT);
+    pinMode(LED_PIN, OUTPUT);
+    pinMode(POT_PIN, INPUT);
+    pinMode(BUTTON_PIN, INPUT);
+    Serial.begin(9600);
 }
 
 void loop() {
@@ -58,7 +57,9 @@ void loop() {
         break;
     }
 
+
 	brightness = ((value / 2.0) + 0.5) * 255;
+    Serial.println(brightness);
 	analogWrite(LED_PIN, brightness);
 
 	delayMicroseconds(1000);
