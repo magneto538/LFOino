@@ -18,7 +18,7 @@ https://playground.arduino.cc/Main/TimerPWMCheatsheet/
 #define LED_PIN 6
 #define SIGNAL_PIN 5
 #define POT_PIN A0
-#define BUTTON_PIN 7
+#define WAVE_PIN A1
 #define TAP_TEMPO_PIN 8
 
 // Define Max and Min rate. May be floating point numbers
@@ -26,24 +26,33 @@ https://playground.arduino.cc/Main/TimerPWMCheatsheet/
 #define RATE_MAX 20.0
 
 // Define Sample Rate. Used to handle phasor.
-#define SR 32000
+#define SR 31000.0
 
-double ph;
+double ph = 0;
 double rate;
 double value;
 double tap[4];
-int tapCount;
+double delta;
+double tapTime = 0;
+
+int tapCount = 0;
 
 int wave = 0;
 int waveBtnState;
 int tapBtnState;
-int potVal;
+int rateVal;
+int waveVal;
+
+unsigned long samplesUptime = 0;
+double msUptime = 0;
 
 void setup() {
   pinMode(SIGNAL_PIN, OUTPUT);
   pinMode(LED_PIN, OUTPUT);
   pinMode(POT_PIN, INPUT);
-  pinMode(BUTTON_PIN, INPUT);
+  pinMode(WAVE_PIN, INPUT);
+  pinMode(TAP_TEMPO_PIN, INPUT);
+  Serial.begin(9600);
 
   cli(); // stop interrupts
 
@@ -69,7 +78,7 @@ void setup() {
   sei(); // allow interrupts
   
   // Additional config things
-  potVal = analogRead(POT_PIN);
+  rateVal = analogRead(POT_PIN);
 
 } 
 
@@ -83,37 +92,54 @@ extern "C"
     if (ph >= SR) {
       ph = 0;
     }
+
+    samplesUptime = (samplesUptime+1) % 0xFFFFFFFF;
+    
   }
 }
 
 void loop() {
   // Scale the pot value into a double-type value. Mapf allows to map doubles instead of int.
-  if (potVal != analogRead(POT_PIN)) {
+  if (rateVal != analogRead(POT_PIN)) {
     rate = mapf(analogRead(POT_PIN), 0, 1023, RATE_MIN, RATE_MAX);
   }
-  potVal = analogRead(POT_PIN);
+  rateVal = analogRead(POT_PIN);
 
-  // Button handling. Choose the next waveform
-  if (digitalRead(BUTTON_PIN) == HIGH && waveBtnState != HIGH) {
-    wave = (wave + 1) % 4;
-  };
-  waveBtnState = digitalRead(BUTTON_PIN);
+  if (waveVal != analogRead(WAVE_PIN)) {
+    wave = map(analogRead(WAVE_PIN), 0, 1023, 0, 3);
+  }
+  waveVal = analogRead(WAVE_PIN);
 
-  if (digitalRead(TAP_TEMPO_PIN) == HIGH && tapBtnState != HIGH) {
-    if (tapCount > 0) {
-      tap[tapCount] = rate - tap[tapCount-1];
+  if (digitalRead(TAP_TEMPO_PIN) == HIGH && tapBtnState != digitalRead(TAP_TEMPO_PIN)) {
 
-      for(int i=0; i<tapCount; i++){
-        rate = (tap[i]) / tapCount;
-      }
+    tapTime = ((samplesUptime / SR) * 1000) - tapTime;
+
+    if (tapCount == 0 || tapTime > 2500) {
+      tap[tapCount] = 0;
     }
     else {
-      tap[tapCount] = rate;
+      tap[tapCount] = tapTime;
+
+      delta = 0.0;
+      for(int i=0; i<tapCount; i++){
+        delta += tap[i];
+      } 
+      delta = (delta / (tapCount+1)) / 1000;
+      rate = 1 / delta;
+
+
     }
+
+    Serial.println(tapTime);
 
     tapCount = (tapCount+1) % 4;
   };
   tapBtnState = digitalRead(TAP_TEMPO_PIN);  
+
+
+
+
+
 
   // Wave selection
   switch (wave) {
