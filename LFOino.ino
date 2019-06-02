@@ -15,10 +15,12 @@ https://playground.arduino.cc/Main/TimerPWMCheatsheet/
 // D7: Shape selector inlet
 // A0: Rate pot inlet
 
-#define LED_PIN 6
-#define SIGNAL_PIN 5
+#define LED_PIN 11
+#define LFO1_PIN 5
+#define LFO2_PIN 6
 #define POT_PIN A0
 #define WAVE_PIN A1
+#define RATE_EXT_PIN A2
 #define TAP_TEMPO_PIN 12
 
 // Define Max and Min rate. May be floating point numbers
@@ -28,9 +30,10 @@ https://playground.arduino.cc/Main/TimerPWMCheatsheet/
 // Define Sample Rate. Used to handle phasor.
 #define SR 31000.0
 
-#define TAP_MAX 6
+#define TAP_MAX 5
 
 double ph = 0;
+double newCycle = 0;
 double rate;
 double value;
 double tap[TAP_MAX];
@@ -48,12 +51,17 @@ int waveVal;
 unsigned long samplesUptime = 0;
 
 void setup() {
-  pinMode(SIGNAL_PIN, OUTPUT);
+  pinMode(LFO1_PIN, OUTPUT);
+  pinMode(LFO2_PIN, OUTPUT);
   pinMode(LED_PIN, OUTPUT);
   pinMode(POT_PIN, INPUT);
   pinMode(WAVE_PIN, INPUT);
+  pinMode(RATE_EXT_PIN, INPUT);
   pinMode(TAP_TEMPO_PIN, INPUT_PULLUP);
+
   Serial.begin(9600);
+
+  randomSeed(analogRead(0));
 
   cli(); // stop interrupts
 
@@ -91,7 +99,11 @@ extern "C"
     ph = ph + rate;
 
     if (ph >= SR) {
-      ph = 0;
+      ph = 0; 
+      newCycle = 1;
+    } 
+    else {
+      newCycle = 0;
     }
 
     samplesUptime = (samplesUptime+1) % 0xFFFFFFFF;
@@ -102,13 +114,18 @@ extern "C"
 void loop() {
   if (rateVal != potMap(POT_PIN, 0, 31)) {
     rate = mapf(analogRead(POT_PIN), 0, 1023, RATE_MIN, RATE_MAX);
-   Serial.println(rate);
   }
   rateVal = potMap(POT_PIN, 0, 31);
-
-
+  /*
+  if (analogRead(RATE_EXT_PIN) == 0) {
+  } 
+  else {
+    rate = mapf(analogRead(RATE_EXT_PIN), 0, 1023, RATE_MIN, RATE_MAX);
+    rateVal = potMap(RATE_EXT_PIN, 0, 31);
+  } 
+*/
   if (waveVal != analogRead(WAVE_PIN)) {
-    wave = map(analogRead(WAVE_PIN), 0, 1023, 0, 3);
+    wave = map(analogRead(WAVE_PIN), 0, 1023, 0, 5);
   }
   waveVal = analogRead(WAVE_PIN);
 
@@ -116,9 +133,21 @@ void loop() {
   if (digitalRead(TAP_TEMPO_PIN) == LOW && tapBtnState != digitalRead(TAP_TEMPO_PIN)) {
     if (tapCount == 0 || msUptime() - tapTime > 3000) {
       tapCount = 0;
+
+      for(int i=0; i<TAP_MAX; i++){
+        tap[i] = -1;
+      } 
+
       tap[tapCount] = msUptime();
+      ph = 0;
     }
-    else {
+    else {  
+      if (tap[tapCount] != -1) {
+        for(int i=0; i<TAP_MAX; i++){
+          tap[i] = tap[i+1];
+        } 
+      }
+
       tap[tapCount-1] = msUptime() - tap[tapCount-1];
       tap[tapCount] = msUptime();
 
@@ -126,45 +155,56 @@ void loop() {
       for(int i=0; i<tapCount; i++){
         delta += tap[i];
       } 
-      delta = (delta / (tapCount+1)) / 1000;
-      rate = 1.0 / delta;
 
+      delta = (delta / tapCount) / 1000;
+      rate = 1 / delta;
     }
 
     tapTime = msUptime();
-    tapCount = (tapCount+1) % TAP_MAX;
+
+    if (tapCount < TAP_MAX-1) {
+      tapCount++;
+    };
   };
   tapBtnState = digitalRead(TAP_TEMPO_PIN);  
+
+
+  Serial.println(wave);
 
   // Wave selection
   switch (wave) {
     case 0:
-       value = ((ph / SR) * 2) - 1;
+       value = waveSaw(ph, SR);
       break;
 
     case 1:
-      value = sin((ph / SR) * 2*PI);
+      value = waveSin(ph, SR, 1);
       break;
 
     case 2:
-      if (ph < SR/2) {
-        value = 1.0;
-      }
-      else {
-        value = -1.0;
-      };
+      value = waveSqr(ph, SR);
       break;
 
     case 3:
-      value = ph - SR/2;
-      value = (0.002 * abs(value) * 2) - 1;
+      value = waveTri(ph, SR);
+      break;
+
+    case 4:
+      value = waveSin(ph, SR, 2);
+      break;
+
+    case 5:
+      if (newCycle = 1) {
+        value = random(-100, 100) / 100;
+      }
       break;
   }
 
   // Fire the current value to the outlets
   value = ((value / 2.0) + 0.5) * 255;
   analogWrite(LED_PIN, value);
-  analogWrite(SIGNAL_PIN, value);
+  analogWrite(LFO1_PIN, value);
+  analogWrite(LFO2_PIN, value);
 } 
 
 double mapf(double x, double in_min, double in_max, double out_min, double out_max) {
@@ -178,3 +218,24 @@ double msUptime() {
 int potMap(int pin, int toLow, int toHigh) {
   return map(analogRead(pin), 0, 1023, toLow, toHigh);
 }
+
+double waveSaw(double ph, double sr) {
+  return ((ph / sr) * 2) - 1;
+}
+
+double waveSin(double ph, double sr, int partials) {
+  double output = 0;
+
+  for(int i=0; i<partials; i++){
+    return output + (i+1) * sin(((ph / SR) * 2*PI) / (i+1));
+  }
+}
+
+double waveSqr(double ph, double sr) {
+  return (round(ph / SR) * 2) - 1;
+}
+
+double waveTri(double ph, double sr) {
+  return (abs(waveSaw(ph, sr)) * 2) - 1;
+}
+
